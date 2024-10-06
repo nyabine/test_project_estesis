@@ -18,29 +18,34 @@ reviews_router = APIRouter(tags=['review'], prefix='/api/movies')
 
       
 @reviews_router.post('/{movie_id}/reviews')
-async def create_review(review_model: ReviewCreateModel, movie_id = UUID) -> ReviewModel | ErrorModel:
+async def create_review(review_model: ReviewCreateModel, response: Response) -> ReviewModel | ErrorModel:
     """
     Добавить отзыв
     """
     async with make_session() as session:
-        review = Review(**review_model.model_dump())
-        session.add(review)
-        await session.flush()
-        
-        query = select(func.avg(Review.rate)).where(Review.movie_id == movie_id)
-        avg_rating_result = await session.execute(query)
-        avg_rating = avg_rating_result.scalar() or 0.0
-        
-        update_query = update(Movie).where(Movie.movie_id == movie_id).values(avg_rating=avg_rating)
-        await session.execute(update_query)
+        try:
+            review = Review(movie_id=review_model.movie_id,
+                            review_content=review_model.review_content,
+                            rate=review_model.rate)
+            session.add(review)
+            await session.flush()
+            
+            avg_rating_query = select(func.avg(Review.rate)).where(Review.movie_id == review.movie_id)
+            avg_rating_result = await session.execute(avg_rating_query)
+            avg_rating = avg_rating_result.scalar() or 0.0
+            
+            update_query = update(Movie).where(Movie.movie_id == review.movie_id).values(avg_rating=avg_rating)
+            await session.execute(update_query)
 
-        await session.commit()
-        
-        return ReviewModel(review_id = review.review_id,
-                           movie_id = movie_id,
-                           review_content = review.review_content,
-                           rate = review.rate,
-                           review_date = review.review_date)
+            await session.commit()
+            
+            return ReviewModel(review_id = review.review_id,
+                               movie_id = review.movie_id,
+                               review_content = review.review_content,
+                               rate = review.rate)
+        except IntegrityError:
+            response.status_code = 400
+            return ErrorModel(error="Cannot add review because movie doesn't exist")
     
 
 @reviews_router.get('/{movie_id}/reviews')
@@ -58,12 +63,12 @@ async def get_all_film_reviews(movie_id: UUID) -> list[ReviewModel]:
 
 
 @reviews_router.get('/{movie_id}/reviews/{review_id}')
-async def get_review(movie_id: UUID, review_id: UUID, response: Response) -> ReviewModel | ErrorModel:
+async def get_review(review_id: UUID, response: Response) -> ReviewModel | ErrorModel:
     """
     Получить отзыв по ID
     """ 
     async with make_session() as session:
-        query = select(Review).where(Review.movie_id == movie_id, Review.review_id == review_id)
+        query = select(Review).where(Review.review_id == review_id)
         selection = await session.execute(query)
         try:
             return selection.scalar_one()
@@ -73,20 +78,28 @@ async def get_review(movie_id: UUID, review_id: UUID, response: Response) -> Rev
 
 
 @reviews_router.delete('/{movie_id}/reviews/{review_id}')
-async def delete_review(movie_id: UUID, review_id: UUID, response: Response) -> SuccessModel | ErrorModel:
+async def delete_review(review_id: UUID, response: Response) -> SuccessModel | ErrorModel:
     """
     Удаление отзыва
     """
     async with make_session() as session:
         try:
-            delete_query = delete(Review).where(Review.review_id == review_id, Review.movie_id == movie_id)
-            await session.execute(delete_query)
+            query = select(Review).where(Review.review_id == review_id)
+            result = await session.execute(query)
+            review = result.scalar_one_or_none()
+            
+            if review is None:
+                response.status_code = 404
+                return ErrorModel(error="Review doesn't exist")
+            
+            delete_query = delete(Review).where(Review.review_id == review_id)
+            result = await session.execute(delete_query)
 
-            avg_rating_query = select(func.avg(Review.rate)).where(Review.movie_id == movie_id)
+            avg_rating_query = select(func.avg(Review.rate)).where(Review.movie_id == review.movie_id)
             avg_rating_result = await session.execute(avg_rating_query)
             avg_rating = avg_rating_result.scalar() or 0.0
 
-            update_query = update(Movie).where(Movie.movie_id == movie_id).values(avg_rating=avg_rating)
+            update_query = update(Movie).where(Movie.movie_id == review.movie_id).values(avg_rating=avg_rating)
             await session.execute(update_query)
 
             await session.commit()
@@ -102,7 +115,7 @@ async def rate_film(movie_id: UUID, rate: int, response: Response) -> SuccessMod
     """
     async with make_session() as session:
         try:
-            review = Review(movie_id=movie_id, rate=rate, review_content = "", review_date=datetime.now())
+            review = Review(movie_id=movie_id, rate=rate, review_content = "")
             session.add(review)
             await session.flush()
 

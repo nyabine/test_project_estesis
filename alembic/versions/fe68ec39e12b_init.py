@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+import datetime
 
 
 # revision identifiers, used by Alembic.
@@ -33,7 +34,7 @@ def upgrade() -> None:
     sa.Column('movie_id', sa.UUID(), nullable=False),
     sa.Column('review_content', sa.String(), nullable=True),
     sa.Column('rate', sa.Integer(), nullable=False),
-    sa.Column('review_date', sa.DateTime(), nullable=False),
+    sa.Column('review_date', sa.DateTime(), nullable=False, default=datetime.datetime.now()),
     sa.ForeignKeyConstraint(['movie_id'], ['movies.movie_id'], ),
     sa.PrimaryKeyConstraint('review_id')
     )
